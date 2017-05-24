@@ -1,0 +1,9 @@
+[package]
+name = "steamstreaming"
+version = "0.1.0"
+authors = ["Ted Mielczarek <ted@mielczarek.org>"]
+
+[dependencies]
+openssl = "0.9.12"
+rand = "0.3.15"
+rustc-serialize = "^0.3"
