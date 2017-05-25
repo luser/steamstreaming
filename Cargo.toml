@@ -5,5 +5,8 @@ authors = ["Ted Mielczarek <ted@mielczarek.org>"]
 
 [dependencies]
 openssl = "0.9.12"
+protobuf = "1.2.2"
 rand = "0.3.15"
 rustc-serialize = "^0.3"
+#futures = "0.1.13"
+#tokio-core = "0.1.7"

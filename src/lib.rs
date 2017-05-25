@@ -1,26 +1,83 @@
 extern crate openssl;
+extern crate protobuf;
 extern crate rand;
 extern crate rustc_serialize;
 
-use openssl::ssl::{SslMethod, SslConnectorBuilder};
+mod proto;
+
+//use openssl::ssl::{SslMethod, SslConnectorBuilder};
+use proto::steammessages_remoteclient_discovery::{CMsgRemoteClientBroadcastHeader, CMsgRemoteClientBroadcastDiscovery, CMsgRemoteClientBroadcastStatus, ERemoteClientBroadcastMsg};
+use protobuf::{parse_from_bytes, CodedInputStream, CodedOutputStream, Message};
 use rustc_serialize::hex::FromHex;
-use std::net::{TcpStream, ToSocketAddrs};
+use std::io;
+use std::net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs, UdpSocket};
 
-const PSK_IDENTITY: &'static [u8] = b"steam";
+const MAGIC: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x21, 0x4C, 0x5F, 0xA0];
+const DISCOVERY_PORT: u16 = 27036;
+//const PSK_IDENTITY: &'static [u8] = b"steam";
 
-pub fn connect<A>(hostname: A, psk: &str, client_id: u64)
+pub fn discover(client_id: u64, sequence_number: u32) -> io::Result<()> {
+    let sock = UdpSocket::bind((Ipv4Addr::new(0,0,0,0), 0))?;
+    sock.set_broadcast(true)?;
+    let mut data: Vec<u8> = vec![];
+    {
+        let mut os = CodedOutputStream::vec(&mut data);
+        let mut header = CMsgRemoteClientBroadcastHeader::new();
+        header.set_client_id(client_id);
+        header.set_msg_type(ERemoteClientBroadcastMsg::k_ERemoteClientBroadcastMsgDiscovery);
+        os.write_raw_bytes(&MAGIC).unwrap();
+        let len = header.compute_size();
+        println!("header len: {}", len);
+        os.write_raw_little_endian32(len).unwrap();
+        header.write_to(&mut os)?;
+        let mut body = CMsgRemoteClientBroadcastDiscovery::new();
+        body.set_seq_num(sequence_number);
+        let len = body.compute_size();
+        println!("body len: {}", len);
+        os.write_raw_little_endian32(len).unwrap();
+        body.write_to(&mut os)?;
+        os.flush().unwrap();
+    }
+
+    // Send a broadcast packet.
+    let dest = SocketAddrV4::new(Ipv4Addr::new(255,255,255,255), DISCOVERY_PORT);
+    let sent = sock.send_to(&data, dest)?;
+    if sent != data.len() {
+        panic!("Only sent {}/{} bytes!", sent, data.len());
+    } else {
+        println!("Sent {} bytes", data.len());
+    }
+    let mut buf = [0; 8192];
+    while let Ok((len, addr)) = sock.recv_from(&mut buf) {
+        println!("Got {} bytes from {:?}", len, addr);
+        let mut is = CodedInputStream::from_bytes(&buf[..len]);
+        let magic = is.read_raw_bytes(MAGIC.len() as u32).unwrap();
+        assert_eq!(magic, MAGIC);
+        let len = is.read_raw_little_endian32().unwrap();
+        println!("header len: {}", len);
+        let bytes = is.read_raw_bytes(len).unwrap();
+        let header: CMsgRemoteClientBroadcastHeader = parse_from_bytes(&bytes).unwrap();
+        println!("header: {:?}", header);
+        // check msg_type == k_ERemoteClientBroadcastMsgStatus ?
+        let len = is.read_raw_little_endian32().unwrap();
+        println!("body len: {}", len);
+        let bytes = is.read_raw_bytes(len).unwrap();
+        let body: CMsgRemoteClientBroadcastStatus = parse_from_bytes(&bytes).unwrap();
+        println!("body: {:?}", body);
+    }
+    Ok(())
+}
+
+pub fn connect<A>(hostname: A, psk: &str, _client_id: u64)
     where A: ToSocketAddrs,
 {
-    let addrs = hostname.to_socket_addrs();
+    let _addrs = hostname.to_socket_addrs();
     let psk = psk.from_hex().unwrap();
     assert_eq!(psk.len(), 32);
-    let connector = SslConnectorBuilder::new(SslMethod::tls()).unwrap().build();
+    //let connector = SslConnectorBuilder::new(SslMethod::tls()).unwrap().build();
     unimplemented!()
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-    }
 }
