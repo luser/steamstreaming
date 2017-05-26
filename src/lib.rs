@@ -5,16 +5,17 @@ extern crate rustc_serialize;
 
 mod proto;
 
-//use openssl::ssl::{SslMethod, SslConnectorBuilder};
+use openssl::ssl::{SslMethod, SslConnectorBuilder, SSL_VERIFY_NONE};
 use proto::steammessages_remoteclient_discovery::{CMsgRemoteClientBroadcastHeader, CMsgRemoteClientBroadcastDiscovery, CMsgRemoteClientBroadcastStatus, ERemoteClientBroadcastMsg};
 use protobuf::{parse_from_bytes, CodedInputStream, CodedOutputStream, Message};
-use rustc_serialize::hex::FromHex;
-use std::io;
-use std::net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs, UdpSocket};
+use rustc_serialize::hex::{FromHex, ToHex};
+use std::io::{self, Read};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpStream, ToSocketAddrs, UdpSocket};
 
 const MAGIC: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x21, 0x4C, 0x5F, 0xA0];
 const DISCOVERY_PORT: u16 = 27036;
-//const PSK_IDENTITY: &'static [u8] = b"steam";
+pub const CONTROL_PORT: u16 = 27036;
+const PSK_IDENTITY: &'static str = "steam";
 
 pub fn discover(client_id: u64, sequence_number: u32) -> io::Result<()> {
     let sock = UdpSocket::bind((Ipv4Addr::new(0,0,0,0), 0))?;
@@ -58,24 +59,42 @@ pub fn discover(client_id: u64, sequence_number: u32) -> io::Result<()> {
         let bytes = is.read_raw_bytes(len).unwrap();
         let header: CMsgRemoteClientBroadcastHeader = parse_from_bytes(&bytes).unwrap();
         println!("header: {:?}", header);
-        // check msg_type == k_ERemoteClientBroadcastMsgStatus ?
-        let len = is.read_raw_little_endian32().unwrap();
-        println!("body len: {}", len);
-        let bytes = is.read_raw_bytes(len).unwrap();
-        let body: CMsgRemoteClientBroadcastStatus = parse_from_bytes(&bytes).unwrap();
-        println!("body: {:?}", body);
+        let msg_type = header.get_msg_type();
+        if msg_type == k_ERemoteClientBroadcastMsgStatus {
+            let len = is.read_raw_little_endian32().unwrap();
+            println!("body len: {}", len);
+            let bytes = is.read_raw_bytes(len).unwrap();
+            let body: CMsgRemoteClientBroadcastStatus = parse_from_bytes(&bytes).unwrap();
+            println!("body: {:?}", body);
+        } else {
+            println!("Unexpected message type: {:?}", msg_type);
+        }
     }
     Ok(())
 }
 
-pub fn connect<A>(hostname: A, psk: &str, _client_id: u64)
+pub fn connect<A>(host: A, psk: &str, _client_id: u64)
     where A: ToSocketAddrs,
 {
-    let _addrs = hostname.to_socket_addrs();
     let psk = psk.from_hex().unwrap();
     assert_eq!(psk.len(), 32);
-    //let connector = SslConnectorBuilder::new(SslMethod::tls()).unwrap().build();
-    unimplemented!()
+    let mut builder = SslConnectorBuilder::new(SslMethod::tls()).unwrap();
+    {
+        let ssl_builder = builder.builder_mut();
+        ssl_builder.set_verify(SSL_VERIFY_NONE);
+        ssl_builder.set_cipher_list("PSK-AES128-CBC-SHA").unwrap();
+        ssl_builder.set_psk_callback(move |_ssl, _hint| {
+            println!("psk_callback");
+            Ok((PSK_IDENTITY.to_string(), psk.clone()))
+        });
+    }
+    let connector = builder.build();
+    let stream = TcpStream::connect(host).unwrap();
+    let mut stream = connector.danger_connect_without_providing_domain_for_certificate_verification_and_server_name_indication(stream).unwrap();
+    let mut buf = [0; 8192];
+    let bytes_read = stream.read(&mut buf).unwrap();
+    println!("read {} bytes:", bytes_read);
+    println!("{}", &buf[..bytes_read].to_hex());
 }
 
 #[cfg(test)]
