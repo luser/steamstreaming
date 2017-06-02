@@ -9,7 +9,7 @@ use openssl::ssl::{SslMethod, SslConnectorBuilder, SSL_VERIFY_NONE};
 use proto::steammessages_remoteclient_discovery::{CMsgRemoteClientBroadcastHeader, CMsgRemoteClientBroadcastDiscovery, CMsgRemoteClientBroadcastStatus, ERemoteClientBroadcastMsg};
 use protobuf::{parse_from_bytes, CodedInputStream, CodedOutputStream, Message};
 use rustc_serialize::hex::{FromHex, ToHex};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream, ToSocketAddrs, UdpSocket};
 
 const MAGIC: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x21, 0x4C, 0x5F, 0xA0];
@@ -60,7 +60,7 @@ pub fn discover(client_id: u64, sequence_number: u32) -> io::Result<()> {
         let header: CMsgRemoteClientBroadcastHeader = parse_from_bytes(&bytes).unwrap();
         println!("header: {:?}", header);
         let msg_type = header.get_msg_type();
-        if msg_type == k_ERemoteClientBroadcastMsgStatus {
+        if msg_type == ERemoteClientBroadcastMsg::k_ERemoteClientBroadcastMsgStatus {
             let len = is.read_raw_little_endian32().unwrap();
             println!("body len: {}", len);
             let bytes = is.read_raw_bytes(len).unwrap();
@@ -83,9 +83,11 @@ pub fn connect<A>(host: A, psk: &str, _client_id: u64)
         let ssl_builder = builder.builder_mut();
         ssl_builder.set_verify(SSL_VERIFY_NONE);
         ssl_builder.set_cipher_list("PSK-AES128-CBC-SHA").unwrap();
-        ssl_builder.set_psk_callback(move |_ssl, _hint| {
-            println!("psk_callback");
-            Ok((PSK_IDENTITY.to_string(), psk.clone()))
+        ssl_builder.set_psk_callback(move |_ssl, _hint, mut identity, mut psk_buf| {
+            identity.write_all(PSK_IDENTITY.as_bytes()).unwrap();
+            identity.write(&[0]).unwrap();
+            psk_buf.write_all(&psk).unwrap();
+            Ok(psk.len())
         });
     }
     let connector = builder.build();
