@@ -5,6 +5,7 @@ authors = ["Ted Mielczarek <ted@mielczarek.org>"]
 license = "MIT"
 
 [dependencies]
+error-chain = "0.10.0"
 openssl = { git = "https://github.com/luser/rust-openssl", branch = "psk" }
 protobuf = "1.2.2"
 rand = "0.3.15"
