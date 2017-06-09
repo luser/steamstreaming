@@ -5,7 +5,8 @@ extern crate protobuf;
 extern crate rand;
 extern crate rustc_serialize;
 
-mod errors;
+pub mod crypto;
+pub mod errors;
 mod proto;
 
 use errors::*;
